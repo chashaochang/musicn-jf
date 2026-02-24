@@ -136,6 +136,6 @@ export function updateTaskStatus(id, status, errorMessage = null, additionalData
  */
 export function getNextQueuedTask() {
   const db = getDatabase();
-  const stmt = db.prepare('SELECT * FROM tasks WHERE status = "queued" ORDER BY created_at ASC LIMIT 1');
-  return stmt.get();
+  const stmt = db.prepare('SELECT * FROM tasks WHERE status = ? ORDER BY created_at ASC LIMIT 1');
+  return stmt.get('queued');
 }
