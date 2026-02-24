@@ -164,8 +164,8 @@ function displayTasks(tasks) {
   tasksList.innerHTML = tasks.map(task => `
     <div class="task-item">
       <img 
-        src="${task.cover_url || '/placeholder.png'}" 
-        alt="${task.title}"
+        src="${escapeHtml(task.cover_url || '/placeholder.png')}" 
+        alt="${escapeHtml(task.title)}"
         class="task-cover"
         onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2260%22 height=%2260%22%3E%3Crect fill=%22%23ddd%22 width=%2260%22 height=%2260%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22 font-size=%2224%22%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E'"
       >
@@ -174,13 +174,13 @@ function displayTasks(tasks) {
         <div class="task-artist">${escapeHtml(task.artist)}</div>
         <div class="task-meta">
           ${task.album ? escapeHtml(task.album) + ' · ' : ''}
-          ${task.format}
+          ${escapeHtml(task.format)}
           ${task.library_path ? ' · ' + escapeHtml(task.library_path) : ''}
         </div>
         ${task.error_message ? `<div class="error-message">${escapeHtml(task.error_message)}</div>` : ''}
       </div>
-      <div class="task-status status-${task.status}">
-        ${task.status}
+      <div class="task-status status-${escapeHtml(task.status)}">
+        ${escapeHtml(task.status)}
       </div>
     </div>
   `).join('');
