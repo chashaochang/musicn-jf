@@ -83,6 +83,48 @@ docker run -d \
   musicn-jf
 ```
 
+#### Using Pre-built Docker Hub Image
+
+Pre-built multi-platform Docker images are automatically published to Docker Hub:
+
+```bash
+docker pull chashaochang/musicn-jf:latest
+
+docker run -d \
+  --name musicn-jf \
+  -p 17890:17890 \
+  -v $(pwd)/config:/config \
+  -v $(pwd)/music:/music \
+  -e PORT=17890 \
+  -e CONFIG_DIR=/config \
+  -e STAGING_DIR=/music/_staging \
+  -e LIBRARY_DIR=/music/Library \
+  -e DEFAULT_SERVICE=migu \
+  chashaochang/musicn-jf:latest
+```
+
+**Available Tags:**
+- `latest` - Latest build from the main branch
+- `v*` - Specific version tags (e.g., `v1.0.0`, `v1.0`, `v1`)
+
+**Supported Platforms:**
+- `linux/amd64` - x86_64 architecture
+- `linux/arm64` - ARM64 architecture (e.g., Raspberry Pi 4, Apple Silicon)
+
+### Docker Hub Publishing
+
+Docker images are automatically built and published to Docker Hub on:
+- Every push to the `main` branch (tagged as `latest`)
+- Every tag matching `v*` pattern (tagged with corresponding semver versions)
+
+**For Repository Maintainers:**
+
+To enable automatic publishing, the following GitHub repository secrets must be configured:
+- `DOCKERHUB_USERNAME` - Your Docker Hub username
+- `DOCKERHUB_TOKEN` - Docker Hub access token (create at https://hub.docker.com/settings/security)
+
+The workflow builds multi-platform images (linux/amd64, linux/arm64) and pushes them to `chashaochang/musicn-jf` on Docker Hub.
+
 ## Unraid Deployment
 
 ### Method 1: Using Docker Compose
