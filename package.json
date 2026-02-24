@@ -1,0 +1,19 @@
+{
+  "name": "musicn-jf",
+  "version": "1.0.0",
+  "description": "Music downloader with WebUI for Docker deployment",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": ["music", "downloader", "docker", "unraid"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "better-sqlite3": "^9.2.2",
+    "got": "^14.0.0"
+  }
+}
