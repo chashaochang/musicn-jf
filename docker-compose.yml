@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  musicn-jf:
+    image: musicn-jf:latest
+    build: .
+    container_name: musicn-jf
+    restart: unless-stopped
+    ports:
+      - "17890:17890"
+    environment:
+      - PORT=17890
+      - CONFIG_DIR=/config
+      - STAGING_DIR=/music/_staging
+      - LIBRARY_DIR=/music/Library
+      - DEFAULT_SERVICE=migu
+    volumes:
+      - ./config:/config
+      - ./music:/music
+    networks:
+      - musicn-network
+
+networks:
+  musicn-network:
+    driver: bridge

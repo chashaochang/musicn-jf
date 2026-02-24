@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Music Downloader</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎵 Music Downloader</h1>
+    </header>
+    
+    <div class="search-section">
+      <h2>Search Music</h2>
+      <div class="search-form">
+        <select id="service">
+          <option value="migu">Migu Music</option>
+        </select>
+        <input 
+          type="text" 
+          id="searchText" 
+          placeholder="Enter song name or artist..."
+          autocomplete="off"
+        >
+        <button id="searchBtn">Search</button>
+      </div>
+      
+      <div id="searchResults" class="results-container"></div>
+    </div>
+    
+    <div class="tasks-section">
+      <h2>Download Tasks</h2>
+      <div id="tasksList" class="tasks-container">
+        <p class="placeholder">No tasks yet</p>
+      </div>
+    </div>
+  </div>
+  
+  <script src="/app.js"></script>
+</body>
+</html>
