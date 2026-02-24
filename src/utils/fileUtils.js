@@ -4,6 +4,9 @@
 export function sanitizeFilename(filename) {
   if (!filename) return 'unknown';
   
+  // Maximum filename length to avoid filesystem issues
+  const MAX_FILENAME_LENGTH = 200;
+  
   // Remove path separators and dangerous characters
   let sanitized = filename
     .replace(/[\/\\]/g, '-')
@@ -12,8 +15,8 @@ export function sanitizeFilename(filename) {
     .trim();
   
   // Limit length
-  if (sanitized.length > 200) {
-    sanitized = sanitized.substring(0, 200);
+  if (sanitized.length > MAX_FILENAME_LENGTH) {
+    sanitized = sanitized.substring(0, MAX_FILENAME_LENGTH);
   }
   
   return sanitized || 'unknown';

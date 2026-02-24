@@ -7,6 +7,7 @@ const tasksList = document.getElementById('tasksList');
 
 // State
 let polling = null;
+let searchResultsData = []; // Store search results data separately
 
 // Search music
 async function searchMusic() {
@@ -44,14 +45,18 @@ async function searchMusic() {
 function displaySearchResults(results) {
   if (!results || results.length === 0) {
     searchResults.innerHTML = '<p class="placeholder">No results found</p>';
+    searchResultsData = [];
     return;
   }
   
-  searchResults.innerHTML = results.map(item => `
+  // Store results data
+  searchResultsData = results;
+  
+  searchResults.innerHTML = results.map((item, index) => `
     <div class="result-item">
       <img 
-        src="${item.coverUrl || '/placeholder.png'}" 
-        alt="${item.title}"
+        src="${escapeHtml(item.coverUrl || '/placeholder.png')}" 
+        alt="${escapeHtml(item.title)}"
         class="result-cover"
         onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2260%22 height=%2260%22%3E%3Crect fill=%22%23ddd%22 width=%2260%22 height=%2260%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22 font-size=%2224%22%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E'"
       >
@@ -60,16 +65,27 @@ function displaySearchResults(results) {
         <div class="result-artist">${escapeHtml(item.artist)}</div>
         <div class="result-meta">
           ${item.album ? escapeHtml(item.album) + ' · ' : ''}
-          ${item.format} · ${item.fileSize}
+          ${escapeHtml(item.format)} · ${escapeHtml(item.fileSize)}
         </div>
       </div>
       <div class="result-actions">
-        <button class="download-btn" onclick="downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+        <button class="download-btn" data-index="${index}" onclick="downloadSongByIndex(${index})">
           Download
         </button>
       </div>
     </div>
   `).join('');
+}
+
+// Download song by index
+async function downloadSongByIndex(index) {
+  const item = searchResultsData[index];
+  if (!item) {
+    alert('Invalid item selected');
+    return;
+  }
+  
+  await downloadSong(item);
 }
 
 // Download song
@@ -117,6 +133,21 @@ async function loadTasks() {
     }
     
     displayTasks(tasks);
+    
+    // Optimize polling: only continue if there are active tasks
+    const hasActiveTasks = tasks.some(task => 
+      ['queued', 'downloading', 'organizing'].includes(task.status)
+    );
+    
+    if (!hasActiveTasks && polling) {
+      // No active tasks, slow down polling
+      stopPolling();
+      startPolling(10000); // Poll every 10 seconds instead
+    } else if (hasActiveTasks && polling) {
+      // Ensure we're polling at fast rate
+      stopPolling();
+      startPolling(3000);
+    }
     
   } catch (error) {
     console.error('Failed to load tasks:', error);
@@ -171,9 +202,9 @@ searchText.addEventListener('keypress', (e) => {
 });
 
 // Start polling for tasks
-function startPolling() {
+function startPolling(interval = 3000) {
   loadTasks();
-  polling = setInterval(loadTasks, 3000); // Poll every 3 seconds
+  polling = setInterval(loadTasks, interval);
 }
 
 // Stop polling

@@ -4,7 +4,10 @@ import { pipeline } from 'stream/promises';
 import got from 'got';
 import config from '../config.js';
 import { getExtension, createLibraryPath } from '../utils/fileUtils.js';
-import { updateTaskStatus, getTaskById } from '../db/database.js';
+import { updateTaskStatus, getTaskById, getNextQueuedTask } from '../db/database.js';
+
+// Track if a download is currently in progress
+let isProcessing = false;
 
 /**
  * Download a file from URL to staging directory
@@ -43,6 +46,7 @@ async function downloadToStaging(url, taskId, artist, title) {
 
 /**
  * Organize file from staging to library
+ * Uses copy + delete for cross-filesystem compatibility
  */
 async function organizeToLibrary(stagingPath, artist, title, ext) {
   const { dir, filename } = createLibraryPath(artist, title, ext);
@@ -54,8 +58,11 @@ async function organizeToLibrary(stagingPath, artist, title, ext) {
     fs.mkdirSync(fullDir, { recursive: true });
   }
   
-  // Move file from staging to library
-  fs.renameSync(stagingPath, libraryPath);
+  // Copy file from staging to library (handles cross-filesystem moves)
+  fs.copyFileSync(stagingPath, libraryPath);
+  
+  // Delete the staging file
+  fs.unlinkSync(stagingPath);
   
   return libraryPath;
 }
@@ -109,13 +116,20 @@ export async function processDownloadTask(taskId) {
  * Start download queue processor
  */
 export function startDownloadQueue() {
-  // Import here to avoid circular dependency
-  import('../db/database.js').then(({ getNextQueuedTask }) => {
-    setInterval(async () => {
-      const task = getNextQueuedTask();
-      if (task) {
+  setInterval(async () => {
+    // Skip if already processing a task
+    if (isProcessing) {
+      return;
+    }
+    
+    const task = getNextQueuedTask();
+    if (task) {
+      isProcessing = true;
+      try {
         await processDownloadTask(task.id);
+      } finally {
+        isProcessing = false;
       }
-    }, 2000); // Check every 2 seconds
-  });
+    }
+  }, 2000); // Check every 2 seconds
 }
