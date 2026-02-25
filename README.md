@@ -264,6 +264,13 @@ Tasks go through the following states:
 - Verify network connectivity from container
 - Check that staging and library directories are writable
 - Review task error messages in the WebUI
+- **Migu listenSong.do URLs**: These URLs return HTTP 302 redirects to the actual audio file. The application automatically follows these redirects to download the correct file with proper extension (mp3/flac/m4a)
+
+### File downloaded with .do extension
+- This issue has been fixed. The application now:
+  1. Follows HTTP 302 redirects from listenSong.do URLs to get the actual audio file URL
+  2. Infers the correct file extension from the final URL path, Content-Type header, or Content-Disposition header
+  3. Saves files with the proper audio extension (.mp3, .flac, .m4a) instead of .do
 
 ### Database issues
 - Database file is stored at `{CONFIG_DIR}/db.sqlite`
