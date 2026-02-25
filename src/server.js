@@ -55,7 +55,8 @@ app.get('/api/search', async (req, res) => {
       query: text,
       pageNum: parseInt(pageNum),
       pageSize: parseInt(pageSize),
-      results
+      results,
+      items: results  // Also return as 'items' for frontend compatibility
     });
     
   } catch (error) {
@@ -83,14 +84,32 @@ app.post('/api/tasks', (req, res) => {
   try {
     const taskData = req.body;
     
+    // Validate required fields
     if (!taskData.downloadUrl) {
-      return res.status(400).json({ error: 'Missing required field: downloadUrl' });
+      return res.status(400).json({ 
+        error: 'Missing required field: downloadUrl',
+        message: 'The downloadUrl field is required to create a download task'
+      });
+    }
+    
+    if (!taskData.title) {
+      return res.status(400).json({ 
+        error: 'Missing required field: title',
+        message: 'The title field is required to create a download task'
+      });
+    }
+    
+    if (!taskData.artist) {
+      return res.status(400).json({ 
+        error: 'Missing required field: artist',
+        message: 'The artist field is required to create a download task'
+      });
     }
     
     const taskId = createTask({
       service: taskData.service || 'migu',
-      title: taskData.title || 'Unknown',
-      artist: taskData.artist || 'Unknown Artist',
+      title: taskData.title,
+      artist: taskData.artist,
       album: taskData.album || '',
       coverUrl: taskData.coverUrl || '',
       downloadUrl: taskData.downloadUrl,
@@ -104,7 +123,10 @@ app.post('/api/tasks', (req, res) => {
     
   } catch (error) {
     console.error('Create task error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: 'Failed to create download task',
+      message: error.message 
+    });
   }
 });
 

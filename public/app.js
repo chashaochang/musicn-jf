@@ -31,7 +31,9 @@ async function searchMusic() {
       throw new Error(data.error);
     }
     
-    displaySearchResults(data.results);
+    // Support both 'results' and 'items' fields for compatibility
+    const results = data.results || data.items || [];
+    displaySearchResults(results);
     
   } catch (error) {
     searchResults.innerHTML = `<p class="placeholder">Error: ${error.message}</p>`;

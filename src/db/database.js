@@ -58,6 +58,20 @@ export function createTask(taskData) {
   const db = getDatabase();
   const now = Date.now();
   
+  // Validate required fields
+  if (!taskData.service) {
+    throw new Error('Missing required field: service');
+  }
+  if (!taskData.title) {
+    throw new Error('Missing required field: title');
+  }
+  if (!taskData.artist) {
+    throw new Error('Missing required field: artist');
+  }
+  if (!taskData.downloadUrl) {
+    throw new Error('Missing required field: downloadUrl');
+  }
+  
   const stmt = db.prepare(`
     INSERT INTO tasks (
       service, title, artist, album, cover_url, download_url,
@@ -65,20 +79,26 @@ export function createTask(taskData) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
   `);
   
-  const result = stmt.run(
-    taskData.service,
-    taskData.title,
-    taskData.artist,
-    taskData.album,
-    taskData.coverUrl,
-    taskData.downloadUrl,
-    taskData.fileSize,
-    taskData.format,
-    now,
-    now
-  );
-  
-  return result.lastInsertRowid;
+  try {
+    const result = stmt.run(
+      taskData.service,
+      taskData.title,
+      taskData.artist,
+      taskData.album,
+      taskData.coverUrl,
+      taskData.downloadUrl,
+      taskData.fileSize,
+      taskData.format,
+      now,
+      now
+    );
+    
+    return result.lastInsertRowid;
+  } catch (error) {
+    console.error('Database insert error:', error);
+    console.error('Task data:', taskData);
+    throw new Error(`Database error: ${error.message}`);
+  }
 }
 
 /**
