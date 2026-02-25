@@ -33,10 +33,24 @@ export function initDatabase() {
       error_message TEXT,
       staging_path TEXT,
       library_path TEXT,
+      source_url TEXT,
+      resolved_url TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )
   `);
+  
+  // Add source_url and resolved_url columns if they don't exist (migration)
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN source_url TEXT`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN resolved_url TEXT`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
   
   return db;
 }
@@ -142,6 +156,16 @@ export function updateTaskStatus(id, status, errorMessage = null, additionalData
   if (additionalData.libraryPath) {
     sql += ', library_path = ?';
     params.push(additionalData.libraryPath);
+  }
+  
+  if (additionalData.sourceUrl) {
+    sql += ', source_url = ?';
+    params.push(additionalData.sourceUrl);
+  }
+  
+  if (additionalData.resolvedUrl) {
+    sql += ', resolved_url = ?';
+    params.push(additionalData.resolvedUrl);
   }
   
   sql += ' WHERE id = ?';
