@@ -60,6 +60,20 @@ app.get('/api/search', async (req, res) => {
     
   } catch (error) {
     console.error('Search error:', error);
+    
+    // Determine appropriate status code and error message
+    if (error.message.includes('HTML instead of JSON') || 
+        error.message.includes('Upstream API error') ||
+        error.message.includes('Network error')) {
+      // Upstream service issues - return 502 Bad Gateway
+      return res.status(502).json({ 
+        error: 'Upstream service error',
+        message: error.message,
+        suggestion: 'The music service may be temporarily unavailable or blocking requests. Please try again later or check the troubleshooting guide.'
+      });
+    }
+    
+    // Other errors - return 500 Internal Server Error
     res.status(500).json({ error: error.message });
   }
 });
