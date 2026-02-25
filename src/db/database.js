@@ -26,7 +26,7 @@ export function initDatabase() {
       artist TEXT,
       album TEXT,
       cover_url TEXT,
-      download_url TEXT NOT NULL,
+      download_url TEXT,
       file_size TEXT,
       format TEXT,
       status TEXT NOT NULL DEFAULT 'queued',
@@ -148,8 +148,19 @@ export function createTask(taskData) {
   if (!taskData.artist) {
     throw new Error('Missing required field: artist');
   }
-  if (!taskData.downloadUrl) {
-    throw new Error('Missing required field: downloadUrl');
+  
+  // For non-migu services, downloadUrl is required
+  // For migu service, either downloadUrl or copyrightId must be provided
+  if (!taskData.downloadUrl || taskData.downloadUrl === '') {
+    if (taskData.service === 'migu') {
+      // Migu service can have empty downloadUrl if copyrightId is provided
+      if (!taskData.copyrightId) {
+        throw new Error('Missing required field: downloadUrl or copyrightId (for migu service)');
+      }
+    } else {
+      // Non-migu services require downloadUrl
+      throw new Error('Missing required field: downloadUrl');
+    }
   }
   
   // Prepare degrade order - default to HQ->PQ->LQ if not specified
