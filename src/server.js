@@ -85,13 +85,6 @@ app.post('/api/tasks', (req, res) => {
     const taskData = req.body;
     
     // Validate required fields
-    if (!taskData.downloadUrl) {
-      return res.status(400).json({ 
-        error: 'Missing required field: downloadUrl',
-        message: 'The downloadUrl field is required to create a download task'
-      });
-    }
-    
     if (!taskData.title) {
       return res.status(400).json({ 
         error: 'Missing required field: title',
@@ -106,8 +99,32 @@ app.post('/api/tasks', (req, res) => {
       });
     }
     
+    // Determine service (default to 'migu')
+    const service = taskData.service || 'migu';
+    
+    // Validate downloadUrl based on service
+    // For non-migu services, downloadUrl is required
+    // For migu service, either downloadUrl or copyrightId must be provided
+    if (!taskData.downloadUrl || taskData.downloadUrl === '') {
+      if (service === 'migu') {
+        // Migu service can have empty downloadUrl if copyrightId is provided
+        if (!taskData.copyrightId) {
+          return res.status(400).json({
+            error: 'Missing required field: downloadUrl or copyrightId',
+            message: 'For migu service, either downloadUrl or copyrightId must be provided'
+          });
+        }
+      } else {
+        // Non-migu services require downloadUrl
+        return res.status(400).json({
+          error: 'Missing required field: downloadUrl',
+          message: 'The downloadUrl field is required to create a download task'
+        });
+      }
+    }
+    
     const taskId = createTask({
-      service: taskData.service || 'migu',
+      service: service,
       title: taskData.title,
       artist: taskData.artist,
       album: taskData.album || '',
