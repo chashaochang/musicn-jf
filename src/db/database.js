@@ -101,6 +101,23 @@ export function initDatabase() {
     // Column already exists, ignore
   }
   
+  // Add Migu-specific resolution fields (migration)
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN copyright_id TEXT`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN content_id TEXT`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN raw_format TEXT`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  
   return db;
 }
 
@@ -140,13 +157,19 @@ export function createTask(taskData) {
     ? JSON.stringify(taskData.degradeOrder)
     : JSON.stringify(['HQ', 'PQ', 'LQ']);
   
+  // Prepare raw format if it's an object
+  const rawFormat = taskData.rawFormat 
+    ? (typeof taskData.rawFormat === 'string' ? taskData.rawFormat : JSON.stringify(taskData.rawFormat))
+    : null;
+  
   const stmt = db.prepare(`
     INSERT INTO tasks (
       service, title, artist, album, cover_url, download_url,
       file_size, format, status, 
       preferred_tone_flag, allow_degrade, degrade_order,
+      copyright_id, content_id, raw_format,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
   try {
@@ -162,6 +185,9 @@ export function createTask(taskData) {
       taskData.preferredToneFlag || 'HQ',
       taskData.allowDegrade ? 1 : 0,
       degradeOrder,
+      taskData.copyrightId || null,
+      taskData.contentId || null,
+      rawFormat,
       now,
       now
     );

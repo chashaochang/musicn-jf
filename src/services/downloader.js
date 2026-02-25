@@ -10,6 +10,154 @@ import { updateTaskStatus, getTaskById, getNextQueuedTask } from '../db/database
 let isProcessing = false;
 
 /**
+ * Resolve Migu download URL using copyrightId and toneFlag
+ * Tries multiple APIs and fields to find a working download URL
+ * @param {string} copyrightId - The Migu copyright ID
+ * @param {string} contentId - The Migu content ID (optional)
+ * @param {string} toneFlag - Quality flag (HQ, PQ, LQ, SQ)
+ * @returns {Promise<{finalUrl: string, contentType?: string, error?: object}>}
+ */
+async function resolveMiguUrl(copyrightId, contentId, toneFlag = 'HQ') {
+  if (!copyrightId) {
+    return {
+      finalUrl: null,
+      error: {
+        message: 'Missing copyrightId - cannot resolve Migu URL',
+        code: 'MISSING_COPYRIGHT_ID'
+      }
+    };
+  }
+  
+  console.log(`Resolving Migu URL: copyrightId=${copyrightId}, contentId=${contentId}, toneFlag=${toneFlag}`);
+  
+  const errors = [];
+  
+  // Strategy 1: Try listenSong.do API (most reliable for direct audio URLs)
+  if (contentId) {
+    try {
+      const listenUrl = `https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/sub/listenSong.do?toneFlag=${toneFlag}&netType=00&userId=&ua=Android_migu&version=5.0.1&copyrightId=${copyrightId}&contentId=${contentId}&resourceType=2&channel=0`;
+      console.log(`Trying listenSong.do: ${listenUrl}`);
+      
+      const result = await resolveDownloadUrl(listenUrl, toneFlag);
+      if (result.finalUrl) {
+        console.log(`Successfully resolved via listenSong.do: ${result.finalUrl}`);
+        return result;
+      }
+      if (result.error) {
+        errors.push({
+          api: 'listenSong.do',
+          ...result.error
+        });
+      }
+    } catch (error) {
+      errors.push({
+        api: 'listenSong.do',
+        message: error.message
+      });
+    }
+  }
+  
+  // Strategy 2: Try resourceinfo.do with different resourceType values
+  const resourceTypes = [2, 0, 'E']; // Try music (2), general (0), and enhanced (E)
+  
+  for (const resourceType of resourceTypes) {
+    try {
+      const resourceUrl = `https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do?copyrightId=${copyrightId}&resourceType=${resourceType}`;
+      console.log(`Trying resourceinfo.do with resourceType=${resourceType}: ${resourceUrl}`);
+      
+      const response = await got.get(resourceUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Referer': 'https://music.migu.cn/'
+        },
+        timeout: { request: 10000 },
+        responseType: 'json',
+        throwHttpErrors: false
+      });
+      
+      const data = response.body;
+      
+      if (data.code !== '000000') {
+        errors.push({
+          api: `resourceinfo.do?resourceType=${resourceType}`,
+          code: data.code,
+          message: data.info || 'Unknown error'
+        });
+        continue;
+      }
+      
+      // Look for URL in various fields
+      if (data.resource && Array.isArray(data.resource) && data.resource.length > 0) {
+        const resource = data.resource[0];
+        const possibleUrlFields = ['audioUrl', 'url', 'playUrl', 'listenUrl', 'downloadUrl'];
+        
+        for (const field of possibleUrlFields) {
+          if (resource[field]) {
+            const audioUrl = resource[field];
+            console.log(`Found ${field} in resourceinfo.do: ${audioUrl}`);
+            
+            // Try to construct direct URL
+            try {
+              const { pathname } = new URL(audioUrl);
+              const directUrl = `https://freetyst.nf.migu.cn${pathname}`;
+              
+              // Verify the URL is accessible
+              const headResponse = await got.head(directUrl, {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                  'Referer': 'https://music.migu.cn/'
+                },
+                timeout: { request: 5000 },
+                throwHttpErrors: false
+              });
+              
+              if (headResponse.statusCode === 200) {
+                console.log(`Successfully resolved via resourceinfo.do: ${directUrl}`);
+                return {
+                  finalUrl: directUrl,
+                  contentType: headResponse.headers['content-type']
+                };
+              }
+            } catch (urlError) {
+              console.error(`Failed to parse or verify URL from ${field}:`, urlError.message);
+            }
+          }
+        }
+        
+        errors.push({
+          api: `resourceinfo.do?resourceType=${resourceType}`,
+          message: `Response successful but no valid URL found in fields: ${possibleUrlFields.join(', ')}`,
+          availableFields: Object.keys(resource)
+        });
+      } else {
+        errors.push({
+          api: `resourceinfo.do?resourceType=${resourceType}`,
+          message: 'Response successful but no resource array found',
+          responseKeys: Object.keys(data)
+        });
+      }
+    } catch (error) {
+      errors.push({
+        api: `resourceinfo.do?resourceType=${resourceType}`,
+        message: error.message
+      });
+    }
+  }
+  
+  // All strategies failed
+  return {
+    finalUrl: null,
+    error: {
+      message: `Failed to resolve Migu URL after trying all strategies`,
+      toneFlag: toneFlag,
+      copyrightId: copyrightId,
+      contentId: contentId,
+      attempts: errors
+    }
+  };
+}
+
+/**
  * Resolve URL by following redirects or parsing JSON responses
  * @param {string} url - The initial URL (e.g., listenSong.do)
  * @param {string} toneFlag - The quality flag (HQ, PQ, LQ, SQ)
@@ -378,59 +526,122 @@ export async function processDownloadTask(taskId) {
       }
     }
     
-    console.log(`Processing task ${taskId}: preferredToneFlag=${preferredToneFlag}, allowDegrade=${allowDegrade}`);
+    console.log(`Processing task ${taskId}: service=${task.service}, preferredToneFlag=${preferredToneFlag}, allowDegrade=${allowDegrade}`);
     
-    // Try to resolve URL with preferred quality first
+    let resolveResult;
     const triedFlags = [preferredToneFlag];
-    let resolveResult = await resolveDownloadUrl(task.download_url, preferredToneFlag);
     
-    // If preferred quality failed and degradation is allowed
-    if (resolveResult.error && allowDegrade) {
-      console.log(`Preferred quality ${preferredToneFlag} failed, attempting degradation...`);
+    // Check if we need to resolve the URL for Migu
+    if (task.service === 'migu' && (!task.download_url || task.download_url === '')) {
+      // Migu service with empty downloadUrl - resolve using copyrightId
+      console.log(`Migu task with empty downloadUrl, resolving using copyrightId=${task.copyright_id}`);
       
-      // Try each quality in degradeOrder
-      for (const toneFlag of degradeOrder) {
-        // Skip if already tried
-        if (triedFlags.includes(toneFlag)) {
-          continue;
+      // Try to resolve URL with preferred quality first
+      resolveResult = await resolveMiguUrl(task.copyright_id, task.content_id, preferredToneFlag);
+      
+      // If preferred quality failed and degradation is allowed
+      if (resolveResult.error && allowDegrade) {
+        console.log(`Preferred quality ${preferredToneFlag} failed, attempting degradation...`);
+        
+        // Try each quality in degradeOrder
+        for (const toneFlag of degradeOrder) {
+          // Skip if already tried
+          if (triedFlags.includes(toneFlag)) {
+            continue;
+          }
+          
+          triedFlags.push(toneFlag);
+          console.log(`Trying degraded quality: ${toneFlag}`);
+          
+          resolveResult = await resolveMiguUrl(task.copyright_id, task.content_id, toneFlag);
+          
+          // If successful, break
+          if (resolveResult.finalUrl) {
+            console.log(`Successfully resolved with degraded quality: ${toneFlag}`);
+            break;
+          }
+        }
+      }
+      
+      // If still failed after all attempts
+      if (resolveResult.error || !resolveResult.finalUrl) {
+        const error = resolveResult.error || {};
+        let errorMessage = `Failed to resolve Migu download URL after trying qualities: ${triedFlags.join(', ')}. `;
+        
+        if (error.copyrightId) {
+          errorMessage += `CopyrightId: ${error.copyrightId}. `;
+        }
+        if (error.attempts && Array.isArray(error.attempts)) {
+          errorMessage += `Attempts: ${error.attempts.map(a => `${a.api}: ${a.message || a.code || 'unknown'}`).join('; ')}`;
+        } else if (error.message) {
+          errorMessage += error.message;
         }
         
-        triedFlags.push(toneFlag);
-        console.log(`Trying degraded quality: ${toneFlag}`);
+        // Store tried flags for debugging
+        updateTaskStatus(taskId, 'failed', errorMessage, {
+          triedToneFlags: triedFlags.join(',')
+        });
         
-        resolveResult = await resolveDownloadUrl(task.download_url, toneFlag);
+        throw new Error(errorMessage);
+      }
+    } else if (task.download_url && task.download_url !== '') {
+      // Has downloadUrl - try to resolve it (for redirects or JSON responses)
+      console.log(`Resolving existing downloadUrl: ${task.download_url}`);
+      resolveResult = await resolveDownloadUrl(task.download_url, preferredToneFlag);
+      
+      // If preferred quality failed and degradation is allowed
+      if (resolveResult.error && allowDegrade) {
+        console.log(`Preferred quality ${preferredToneFlag} failed, attempting degradation...`);
         
-        // If successful, break
-        if (resolveResult.finalUrl) {
-          console.log(`Successfully resolved with degraded quality: ${toneFlag}`);
-          break;
+        // Try each quality in degradeOrder
+        for (const toneFlag of degradeOrder) {
+          // Skip if already tried
+          if (triedFlags.includes(toneFlag)) {
+            continue;
+          }
+          
+          triedFlags.push(toneFlag);
+          console.log(`Trying degraded quality: ${toneFlag}`);
+          
+          resolveResult = await resolveDownloadUrl(task.download_url, toneFlag);
+          
+          // If successful, break
+          if (resolveResult.finalUrl) {
+            console.log(`Successfully resolved with degraded quality: ${toneFlag}`);
+            break;
+          }
         }
       }
-    }
-    
-    // If still failed after all attempts
-    if (resolveResult.error || !resolveResult.finalUrl) {
-      const error = resolveResult.error || {};
-      let errorMessage = `Failed to resolve download URL after trying: ${triedFlags.join(', ')}. `;
       
-      if (error.statusCode) {
-        errorMessage += `Status: ${error.statusCode}`;
+      // If still failed after all attempts
+      if (resolveResult.error || !resolveResult.finalUrl) {
+        const error = resolveResult.error || {};
+        let errorMessage = `Failed to resolve download URL after trying: ${triedFlags.join(', ')}. `;
+        
+        if (error.statusCode) {
+          errorMessage += `Status: ${error.statusCode}`;
+        }
+        if (error.contentType) {
+          errorMessage += `, Content-Type: ${error.contentType}`;
+        }
+        if (error.message) {
+          errorMessage += `, Message: ${error.message}`;
+        }
+        if (error.code) {
+          errorMessage += `, Code: ${error.code}`;
+        }
+        
+        // Store tried flags for debugging
+        updateTaskStatus(taskId, 'failed', errorMessage, {
+          triedToneFlags: triedFlags.join(',')
+        });
+        
+        throw new Error(errorMessage);
       }
-      if (error.contentType) {
-        errorMessage += `, Content-Type: ${error.contentType}`;
-      }
-      if (error.message) {
-        errorMessage += `, Message: ${error.message}`;
-      }
-      if (error.code) {
-        errorMessage += `, Code: ${error.code}`;
-      }
-      
-      // Store tried flags for debugging
-      updateTaskStatus(taskId, 'failed', errorMessage, {
-        triedToneFlags: triedFlags.join(',')
-      });
-      
+    } else {
+      // No downloadUrl and not Migu service - error
+      const errorMessage = 'Cannot download: missing downloadUrl and not a Migu task with copyrightId';
+      updateTaskStatus(taskId, 'failed', errorMessage);
       throw new Error(errorMessage);
     }
     
