@@ -178,6 +178,10 @@ async function downloadToStaging(url, taskId, artist, title) {
   
   try {
     let detectedExt = '.mp3'; // Default
+    let totalBytes = 0;
+    let downloadedBytes = 0;
+    let startTime = Date.now();
+    let lastUpdateTime = startTime;
     
     // Stream download
     const downloadStream = got.stream(url, {
@@ -192,12 +196,68 @@ async function downloadToStaging(url, taskId, artist, title) {
     downloadStream.on('response', (response) => {
       detectedExt = inferExtension(url, response.headers);
       console.log(`Detected extension: ${detectedExt} for URL: ${url}`);
+      
+      // Get total size from Content-Length header
+      const contentLength = response.headers['content-length'];
+      if (contentLength) {
+        totalBytes = parseInt(contentLength, 10);
+        console.log(`Total file size: ${totalBytes} bytes`);
+        updateTaskStatus(taskId, 'downloading', null, {
+          totalBytes,
+          downloadedBytes: 0,
+          progress: 0
+        });
+      }
     });
+    
+    // Track download progress
+    downloadStream.on('data', (chunk) => {
+      downloadedBytes += chunk.length;
+      const now = Date.now();
+      
+      // Update progress every 500ms to avoid too frequent database writes
+      if (now - lastUpdateTime >= 500) {
+        lastUpdateTime = now;
+        
+        const elapsedSeconds = (now - startTime) / 1000;
+        const speedBps = elapsedSeconds > 0 ? Math.floor(downloadedBytes / elapsedSeconds) : 0;
+        
+        let progress = 0;
+        let etaSeconds = 0;
+        
+        if (totalBytes > 0) {
+          progress = Math.min(100, Math.floor((downloadedBytes / totalBytes) * 100));
+          const remainingBytes = totalBytes - downloadedBytes;
+          etaSeconds = speedBps > 0 ? Math.floor(remainingBytes / speedBps) : 0;
+        }
+        
+        updateTaskStatus(taskId, 'downloading', null, {
+          downloadedBytes,
+          totalBytes,
+          progress,
+          speedBps,
+          etaSeconds
+        });
+      }
+    });
+    
+    const writeStream = fs.createWriteStream(stagingPath);
     
     await pipeline(
       downloadStream,
-      fs.createWriteStream(stagingPath)
+      writeStream
     );
+    
+    // Final progress update
+    if (totalBytes > 0) {
+      updateTaskStatus(taskId, 'downloading', null, {
+        downloadedBytes: totalBytes,
+        totalBytes,
+        progress: 100,
+        speedBps: 0,
+        etaSeconds: 0
+      });
+    }
     
     // Rename file with correct extension
     const finalStagingPath = stagingPath.replace('.tmp', detectedExt);

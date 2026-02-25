@@ -52,6 +52,33 @@ export function initDatabase() {
     // Column already exists, ignore
   }
   
+  // Add progress tracking columns if they don't exist (migration)
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN progress INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN downloaded_bytes INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN total_bytes INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN speed_bps INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN eta_seconds INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  
   return db;
 }
 
@@ -166,6 +193,31 @@ export function updateTaskStatus(id, status, errorMessage = null, additionalData
   if (additionalData.resolvedUrl) {
     sql += ', resolved_url = ?';
     params.push(additionalData.resolvedUrl);
+  }
+  
+  if (additionalData.progress !== undefined) {
+    sql += ', progress = ?';
+    params.push(additionalData.progress);
+  }
+  
+  if (additionalData.downloadedBytes !== undefined) {
+    sql += ', downloaded_bytes = ?';
+    params.push(additionalData.downloadedBytes);
+  }
+  
+  if (additionalData.totalBytes !== undefined) {
+    sql += ', total_bytes = ?';
+    params.push(additionalData.totalBytes);
+  }
+  
+  if (additionalData.speedBps !== undefined) {
+    sql += ', speed_bps = ?';
+    params.push(additionalData.speedBps);
+  }
+  
+  if (additionalData.etaSeconds !== undefined) {
+    sql += ', eta_seconds = ?';
+    params.push(additionalData.etaSeconds);
   }
   
   sql += ' WHERE id = ?';

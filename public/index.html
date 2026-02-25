@@ -10,6 +10,10 @@
   <div class="container">
     <header>
       <h1>🎵 Music Downloader</h1>
+      <button id="queueBtn" class="queue-btn" aria-label="Download Queue">
+        <span class="queue-icon">📥</span>
+        <span class="queue-badge" id="queueBadge">0</span>
+      </button>
     </header>
     
     <div class="search-section">
@@ -37,6 +41,18 @@
       </div>
     </div>
   </div>
+  
+  <!-- Download Queue Panel -->
+  <div id="queuePanel" class="queue-panel" style="display: none;">
+    <div class="queue-panel-header">
+      <h3>Download Queue</h3>
+      <button id="closePanelBtn" class="close-panel-btn" aria-label="Close">&times;</button>
+    </div>
+    <div id="queuePanelContent" class="queue-panel-content">
+      <p class="placeholder">No tasks in queue</p>
+    </div>
+  </div>
+  <div id="queuePanelOverlay" class="queue-panel-overlay" style="display: none;"></div>
   
   <script src="/app.js"></script>
 </body>
