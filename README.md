@@ -269,6 +269,40 @@ Tasks go through the following states:
 - Database file is stored at `{CONFIG_DIR}/db.sqlite`
 - To reset: stop container, delete `config/db.sqlite`, restart
 
+### Search fails or returns errors
+
+If you encounter search failures with errors like "Upstream service error" or "HTML instead of JSON", this is typically due to anti-scraping measures from the music service provider:
+
+**Common Causes:**
+1. **Rate limiting** - Too many requests in a short time
+2. **IP blocking** - Your IP may be temporarily blocked
+3. **DNS issues** - DNS resolution failing for upstream services
+4. **API changes** - The upstream API structure may have changed
+
+**Solutions:**
+1. **Wait and retry** - If rate-limited, wait a few minutes before trying again
+2. **Check network connectivity:**
+   ```bash
+   # From inside the container
+   docker exec musicn-jf curl -I https://pd.musicapp.migu.cn
+   ```
+3. **Verify DNS resolution:**
+   ```bash
+   # From inside the container
+   docker exec musicn-jf nslookup pd.musicapp.migu.cn
+   ```
+4. **Update headers** - The API may require updated User-Agent or other headers. Check `src/services/migu.js` and update the headers to match current browser versions
+5. **Check for API changes** - Visit https://music.migu.cn in a browser and check the network tab to see if the API endpoints have changed
+6. **Use a VPN or different network** - If your IP is blocked, try from a different network
+
+**For Developers:**
+If you need to update the API integration:
+1. Open your browser's Developer Tools (F12)
+2. Go to https://music.migu.cn and perform a search
+3. Check the Network tab for API calls
+4. Update `src/services/migu.js` with the current API endpoint and parameters
+5. Ensure all required headers are included
+
 ## Development
 
 ### Project Structure
