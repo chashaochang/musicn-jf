@@ -91,11 +91,11 @@ function displaySearchResults(results) {
         <div class="result-artist">${escapeHtml(item.artist)}</div>
         <div class="result-meta">
           ${item.album ? escapeHtml(item.album) + ' · ' : ''}
-          ${escapeHtml(item.format)} · ${escapeHtml(item.fileSize)}
+          ${escapeHtml(item.format)}
         </div>
       </div>
       <div class="result-actions">
-        <button class="download-btn" data-index="${index}" onclick="downloadSongByIndex(${index}, this)">
+        <button class="download-btn ${item.disabled ? 'disabled' : ''}" data-index="${index}" onclick="downloadSongByIndex(${index}, this)" ${item.disabled ? 'disabled' : ''}>
           Download
         </button>
       </div>
@@ -108,6 +108,12 @@ async function downloadSongByIndex(index, buttonElement) {
   const item = window.searchResultsData[index];
   if (!item) {
     alert('Invalid item selected');
+    return;
+  }
+  
+  // Check if item is disabled
+  if (item.disabled) {
+    alert('This song is not available for download');
     return;
   }
   
