@@ -237,7 +237,11 @@ async function downloadSong(item, preferredToneFlag = 'HQ', allowDegrade = false
         format: item.format,
         preferredToneFlag: preferredToneFlag,
         allowDegrade: allowDegrade,
-        degradeOrder: degradeOrder
+        degradeOrder: degradeOrder,
+        // Pass Migu resolution fields
+        copyrightId: item.copyrightId,
+        contentId: item.contentId,
+        rawFormat: item.rawFormat
       })
     });
     

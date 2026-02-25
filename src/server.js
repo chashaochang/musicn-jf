@@ -117,7 +117,10 @@ app.post('/api/tasks', (req, res) => {
       format: taskData.format || 'MP3',
       preferredToneFlag: taskData.preferredToneFlag || 'HQ',
       allowDegrade: taskData.allowDegrade || false,
-      degradeOrder: taskData.degradeOrder || ['HQ', 'PQ', 'LQ']
+      degradeOrder: taskData.degradeOrder || ['HQ', 'PQ', 'LQ'],
+      copyrightId: taskData.copyrightId || null,
+      contentId: taskData.contentId || null,
+      rawFormat: taskData.rawFormat || null
     });
     
     const task = getTaskById(taskId);

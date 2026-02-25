@@ -51,64 +51,46 @@ export async function searchMigu(text, pageNum = 1, pageSize = 20) {
       return [];
     }
     
-    // Fetch resourceinfo for each song to get direct URLs
-    const detailResults = await Promise.all(
-      songs.map(async (song) => {
-        try {
-          const copyrightId = song.copyrightId || song.id || song.contentId;
-          const detailUrl = `https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do?copyrightId=${copyrightId}&resourceType=2`;
-          const detailResponse = await got.get(detailUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Referer': 'https://music.migu.cn/'
-            },
-            timeout: { request: 5000 },
-            responseType: 'text'
-          });
-          return JSON.parse(detailResponse.body);
-        } catch (error) {
-          console.error(`Failed to fetch resourceinfo for song ${song.copyrightId}:`, error.message);
-          return null;
-        }
-      })
-    );
-    
-    return songs.map((item, index) => {
+    // Route 1: Don't resolve directUrl during search
+    // Just return essential metadata and let download task resolve the URL
+    return songs.map((item) => {
       const rawFormat = item.format || item.formatType || item.rateFormats;
       const { format } = getFormatAndSize(item, rawFormat);
       
-      // Get direct URL from resourceinfo
-      const detailData = detailResults[index];
-      let directUrl = null;
-      let disabled = true;
+      // Extract copyrightId - required for URL resolution during download
+      const copyrightId = item.copyrightId || item.id || item.contentId;
+      const contentId = item.contentId || item.id || item.copyrightId;
       
-      if (detailData && detailData.resource && detailData.resource[0]) {
-        const { audioUrl } = detailData.resource[0];
-        if (audioUrl) {
-          try {
-            const { pathname } = new URL(audioUrl);
-            directUrl = `https://freetyst.nf.migu.cn${pathname}`;
-            disabled = false;
-          } catch (urlError) {
-            console.error('Failed to parse audioUrl:', audioUrl, urlError.message);
-          }
-        }
+      // Only disable if critical identifiers are missing
+      const disabled = !copyrightId;
+      
+      // Prioritize imgItems[].img for cover URL, with fallbacks
+      let coverUrl = '';
+      if (item.imgItems && Array.isArray(item.imgItems) && item.imgItems.length > 0) {
+        // Try to find a suitable size (500 or 400 preferred, fallback to first)
+        const img500 = item.imgItems.find(img => img.img && img.img.includes('500'));
+        const img400 = item.imgItems.find(img => img.img && img.img.includes('400'));
+        const firstImg = item.imgItems.find(img => img.img);
+        coverUrl = (img500 || img400 || firstImg)?.img || '';
+      }
+      // Fallback to other cover fields
+      if (!coverUrl) {
+        coverUrl = item.cover || item.albumImgs || item.largePic || '';
       }
       
       return {
-        id: item.id || item.contentId || item.copyrightId,
-        copyrightId: item.copyrightId, // Explicitly return copyrightId from API
-        contentId: item.contentId, // Explicitly return contentId from API
+        id: item.id || contentId,
+        copyrightId: copyrightId,
+        contentId: contentId,
         title: item.name || item.songName || 'Unknown',
         artist: item.singers?.map(s => s.name).join(', ') || item.singer || 'Unknown Artist',
         album: item.albums?.[0]?.name || item.albumName || '',
-        coverUrl: normalizeCoverUrl(item.cover || item.albumImgs || item.largePic),
-        downloadUrl: directUrl || '', // Use directUrl as downloadUrl
-        directUrl: directUrl,
+        coverUrl: normalizeCoverUrl(coverUrl),
+        downloadUrl: '', // Empty - will be resolved during download
         disabled: disabled,
         fileSize: '', // Don't show file size per user requirement
         format: format,
-        // Keep raw format data for reference
+        // Keep raw format data and IDs for URL resolution during download
         rawFormat: rawFormat
       };
     });
