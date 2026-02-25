@@ -4,7 +4,7 @@ import { pipeline } from 'stream/promises';
 import got from 'got';
 import config from '../config.js';
 import { getExtension, createLibraryPath } from '../utils/fileUtils.js';
-import { updateTaskStatus, getTaskById, getNextQueuedTask } from '../db/database.js';
+import { updateTaskStatus, updateTaskProgress, getTaskById, getNextQueuedTask } from '../db/database.js';
 
 // Track if a download is currently in progress
 let isProcessing = false;
@@ -178,6 +178,10 @@ async function downloadToStaging(url, taskId, artist, title) {
   
   try {
     let detectedExt = '.mp3'; // Default
+    let totalBytes = 0;
+    let downloadedBytes = 0;
+    let startTime = Date.now();
+    let lastUpdateTime = startTime;
     
     // Stream download
     const downloadStream = got.stream(url, {
@@ -188,16 +192,70 @@ async function downloadToStaging(url, taskId, artist, title) {
       timeout: { request: 60000 }
     });
     
-    // Get headers from the response to infer extension
+    // Get headers from the response to infer extension and total size
     downloadStream.on('response', (response) => {
       detectedExt = inferExtension(url, response.headers);
       console.log(`Detected extension: ${detectedExt} for URL: ${url}`);
+      
+      // Get total size from Content-Length header
+      const contentLength = response.headers['content-length'];
+      if (contentLength) {
+        totalBytes = parseInt(contentLength, 10);
+        console.log(`Total file size: ${totalBytes} bytes`);
+        
+        // Initialize progress
+        updateTaskProgress(taskId, {
+          progress: 0,
+          downloadedBytes: 0,
+          totalBytes: totalBytes,
+          speedBps: 0,
+          etaSeconds: 0
+        });
+      }
     });
+    
+    // Track download progress
+    downloadStream.on('data', (chunk) => {
+      downloadedBytes += chunk.length;
+      const now = Date.now();
+      
+      // Update progress every 500ms to avoid excessive DB writes
+      if (now - lastUpdateTime >= 500) {
+        const elapsed = (now - startTime) / 1000; // seconds
+        const speedBps = elapsed > 0 ? downloadedBytes / elapsed : 0;
+        const progress = totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0;
+        const remainingBytes = totalBytes - downloadedBytes;
+        const etaSeconds = speedBps > 0 && totalBytes > 0 ? remainingBytes / speedBps : 0;
+        
+        updateTaskProgress(taskId, {
+          progress: Math.min(progress, 100),
+          downloadedBytes,
+          totalBytes,
+          speedBps,
+          etaSeconds: Math.round(etaSeconds)
+        });
+        
+        lastUpdateTime = now;
+      }
+    });
+    
+    const writeStream = fs.createWriteStream(stagingPath);
     
     await pipeline(
       downloadStream,
-      fs.createWriteStream(stagingPath)
+      writeStream
     );
+    
+    // Final progress update
+    if (totalBytes > 0) {
+      updateTaskProgress(taskId, {
+        progress: 100,
+        downloadedBytes: totalBytes,
+        totalBytes,
+        speedBps: 0,
+        etaSeconds: 0
+      });
+    }
     
     // Rename file with correct extension
     const finalStagingPath = stagingPath.replace('.tmp', detectedExt);

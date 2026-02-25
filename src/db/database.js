@@ -52,6 +52,33 @@ export function initDatabase() {
     // Column already exists, ignore
   }
   
+  // Add progress tracking columns if they don't exist (migration)
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN progress REAL DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN downloaded_bytes INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN total_bytes INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN speed_bps REAL DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN eta_seconds INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  
   return db;
 }
 
@@ -166,6 +193,48 @@ export function updateTaskStatus(id, status, errorMessage = null, additionalData
   if (additionalData.resolvedUrl) {
     sql += ', resolved_url = ?';
     params.push(additionalData.resolvedUrl);
+  }
+  
+  sql += ' WHERE id = ?';
+  params.push(id);
+  
+  const stmt = db.prepare(sql);
+  return stmt.run(...params);
+}
+
+/**
+ * Update task progress
+ */
+export function updateTaskProgress(id, progressData) {
+  const db = getDatabase();
+  const now = Date.now();
+  
+  let sql = 'UPDATE tasks SET updated_at = ?';
+  const params = [now];
+  
+  if (typeof progressData.progress !== 'undefined') {
+    sql += ', progress = ?';
+    params.push(progressData.progress);
+  }
+  
+  if (typeof progressData.downloadedBytes !== 'undefined') {
+    sql += ', downloaded_bytes = ?';
+    params.push(progressData.downloadedBytes);
+  }
+  
+  if (typeof progressData.totalBytes !== 'undefined') {
+    sql += ', total_bytes = ?';
+    params.push(progressData.totalBytes);
+  }
+  
+  if (typeof progressData.speedBps !== 'undefined') {
+    sql += ', speed_bps = ?';
+    params.push(progressData.speedBps);
+  }
+  
+  if (typeof progressData.etaSeconds !== 'undefined') {
+    sql += ', eta_seconds = ?';
+    params.push(progressData.etaSeconds);
   }
   
   sql += ' WHERE id = ?';

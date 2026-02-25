@@ -10,6 +10,11 @@
   <div class="container">
     <header>
       <h1>🎵 Music Downloader</h1>
+      <button id="queueBtn" class="queue-btn" onclick="toggleQueuePanel()">
+        <span class="queue-icon">📥</span>
+        <span>Queue</span>
+        <span id="queueBadge" class="queue-badge">0</span>
+      </button>
     </header>
     
     <div class="search-section">
@@ -35,6 +40,17 @@
       <div id="tasksList" class="tasks-container">
         <p class="placeholder">No tasks yet</p>
       </div>
+    </div>
+  </div>
+  
+  <!-- Queue Panel -->
+  <div id="queuePanel" class="queue-panel">
+    <div class="queue-header">
+      <h3>Download Queue</h3>
+      <button class="close-btn" onclick="toggleQueuePanel()">✕</button>
+    </div>
+    <div id="queueContent" class="queue-list">
+      <p class="placeholder">No tasks in queue</p>
     </div>
   </div>
   
