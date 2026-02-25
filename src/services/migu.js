@@ -51,16 +51,21 @@ export async function searchMigu(text, pageNum = 1, pageSize = 20) {
       return [];
     }
     
-    return songs.map(item => ({
-      id: item.id || item.contentId || item.copyrightId,
-      title: item.name || item.songName || 'Unknown',
-      artist: item.singers?.map(s => s.name).join(', ') || item.singer || 'Unknown Artist',
-      album: item.albums?.[0]?.name || item.albumName || '',
-      coverUrl: normalizeCoverUrl(item.cover || item.albumImgs || item.largePic),
-      downloadUrl: getDownloadUrl(item),
-      fileSize: formatFileSize(item.fileSize),
-      format: getFormat(item)
-    }));
+    return songs.map(item => {
+      const rawFormat = item.format || item.formatType || item.rateFormats;
+      return {
+        id: item.id || item.contentId || item.copyrightId,
+        title: item.name || item.songName || 'Unknown',
+        artist: item.singers?.map(s => s.name).join(', ') || item.singer || 'Unknown Artist',
+        album: item.albums?.[0]?.name || item.albumName || '',
+        coverUrl: normalizeCoverUrl(item.cover || item.albumImgs || item.largePic),
+        downloadUrl: getDownloadUrl(item),
+        fileSize: formatFileSize(item.fileSize),
+        format: getFormat(item),
+        // Keep raw format data for reference (optional)
+        rawFormat: rawFormat
+      };
+    });
     
   } catch (error) {
     // Distinguish between network errors and API errors
@@ -130,7 +135,7 @@ function getDownloadUrl(item) {
 }
 
 /**
- * Get format from Migu item
+ * Get format from Migu item - always returns a string
  */
 function getFormat(item) {
   // Check formatType field
@@ -141,18 +146,25 @@ function getFormat(item) {
       'HQ': 'MP3 320K',
       'PQ': 'MP3 128K'
     };
-    return formatMap[item.formatType] || item.formatType;
+    return formatMap[item.formatType] || String(item.formatType);
   }
   
   // Check rateFormats
   if (item.rateFormats) {
-    const formats = Array.isArray(item.rateFormats) ? item.rateFormats : item.rateFormats.split(',');
+    const formats = Array.isArray(item.rateFormats) ? item.rateFormats : String(item.rateFormats).split(',');
     const bestFormat = formats[formats.length - 1];
-    return bestFormat || 'MP3';
+    return String(bestFormat || 'MP3');
   }
   
-  // Check explicit format field
-  if (item.format) return item.format;
+  // Check explicit format field - ensure it's always a string
+  if (item.format) {
+    // If format is an object, try to extract meaningful string
+    if (typeof item.format === 'object' && item.format !== null) {
+      // Try common properties for format objects
+      return String(item.format.ext || item.format.type || item.format.formatText || 'MP3');
+    }
+    return String(item.format);
+  }
   
   return 'MP3';
 }
