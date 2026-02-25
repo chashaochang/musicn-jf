@@ -51,9 +51,49 @@ export async function searchMigu(text, pageNum = 1, pageSize = 20) {
       return [];
     }
     
-    return songs.map(item => {
+    // Fetch resourceinfo for each song to get direct URLs
+    const detailResults = await Promise.all(
+      songs.map(async (song) => {
+        try {
+          const copyrightId = song.copyrightId || song.id || song.contentId;
+          const detailUrl = `https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do?copyrightId=${copyrightId}&resourceType=2`;
+          const detailResponse = await got.get(detailUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Referer': 'https://music.migu.cn/'
+            },
+            timeout: { request: 5000 },
+            responseType: 'text'
+          });
+          return JSON.parse(detailResponse.body);
+        } catch (error) {
+          console.error(`Failed to fetch resourceinfo for song ${song.copyrightId}:`, error.message);
+          return null;
+        }
+      })
+    );
+    
+    return songs.map((item, index) => {
       const rawFormat = item.format || item.formatType || item.rateFormats;
-      const { format, fileSize } = getFormatAndSize(item, rawFormat);
+      const { format } = getFormatAndSize(item, rawFormat);
+      
+      // Get direct URL from resourceinfo
+      const detailData = detailResults[index];
+      let directUrl = null;
+      let disabled = true;
+      
+      if (detailData && detailData.resource && detailData.resource[0]) {
+        const { audioUrl } = detailData.resource[0];
+        if (audioUrl) {
+          try {
+            const { pathname } = new URL(audioUrl);
+            directUrl = `https://freetyst.nf.migu.cn${pathname}`;
+            disabled = false;
+          } catch (urlError) {
+            console.error('Failed to parse audioUrl:', audioUrl, urlError.message);
+          }
+        }
+      }
       
       return {
         id: item.id || item.contentId || item.copyrightId,
@@ -61,8 +101,10 @@ export async function searchMigu(text, pageNum = 1, pageSize = 20) {
         artist: item.singers?.map(s => s.name).join(', ') || item.singer || 'Unknown Artist',
         album: item.albums?.[0]?.name || item.albumName || '',
         coverUrl: normalizeCoverUrl(item.cover || item.albumImgs || item.largePic),
-        downloadUrl: getDownloadUrl(item),
-        fileSize: fileSize,
+        downloadUrl: directUrl || '', // Use directUrl as downloadUrl
+        directUrl: directUrl,
+        disabled: disabled,
+        fileSize: '', // Don't show file size per user requirement
         format: format,
         // Keep raw format data for reference
         rawFormat: rawFormat
