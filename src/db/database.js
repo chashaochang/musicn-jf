@@ -79,6 +79,28 @@ export function initDatabase() {
     // Column already exists, ignore
   }
   
+  // Add quality selection columns (migration)
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN preferred_tone_flag TEXT`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN allow_degrade INTEGER DEFAULT 0`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN degrade_order TEXT`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN tried_tone_flags TEXT`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  
   return db;
 }
 
@@ -113,11 +135,18 @@ export function createTask(taskData) {
     throw new Error('Missing required field: downloadUrl');
   }
   
+  // Prepare degrade order - default to HQ->PQ->LQ if not specified
+  const degradeOrder = taskData.degradeOrder 
+    ? JSON.stringify(taskData.degradeOrder)
+    : JSON.stringify(['HQ', 'PQ', 'LQ']);
+  
   const stmt = db.prepare(`
     INSERT INTO tasks (
       service, title, artist, album, cover_url, download_url,
-      file_size, format, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+      file_size, format, status, 
+      preferred_tone_flag, allow_degrade, degrade_order,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)
   `);
   
   try {
@@ -130,6 +159,9 @@ export function createTask(taskData) {
       taskData.downloadUrl,
       taskData.fileSize,
       taskData.format,
+      taskData.preferredToneFlag || 'HQ',
+      taskData.allowDegrade ? 1 : 0,
+      degradeOrder,
       now,
       now
     );
@@ -218,6 +250,11 @@ export function updateTaskStatus(id, status, errorMessage = null, additionalData
   if (additionalData.etaSeconds !== undefined) {
     sql += ', eta_seconds = ?';
     params.push(additionalData.etaSeconds);
+  }
+  
+  if (additionalData.triedToneFlags) {
+    sql += ', tried_tone_flags = ?';
+    params.push(additionalData.triedToneFlags);
   }
   
   sql += ' WHERE id = ?';

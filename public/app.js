@@ -11,12 +11,25 @@ const queuePanelOverlay = document.getElementById('queuePanelOverlay');
 const closePanelBtn = document.getElementById('closePanelBtn');
 const queuePanelContent = document.getElementById('queuePanelContent');
 
+// Quality modal elements
+const qualityModal = document.getElementById('qualityModal');
+const modalOverlay = document.getElementById('modalOverlay');
+const closeModalBtn = document.getElementById('closeModalBtn');
+const modalSongTitle = document.getElementById('modalSongTitle');
+const modalSongArtist = document.getElementById('modalSongArtist');
+const qualityOptions = document.getElementById('qualityOptions');
+const degradeOrderSection = document.getElementById('degradeOrderSection');
+const degradeOrderDisplay = document.getElementById('degradeOrderDisplay');
+const cancelDownloadBtn = document.getElementById('cancelDownloadBtn');
+const confirmDownloadBtn = document.getElementById('confirmDownloadBtn');
+
 // State
 let pollingTimeoutId = null; // Timeout ID for next scheduled poll
 let isLoadingTasks = false; // Flag to prevent concurrent requests
 let abortController = null; // AbortController for canceling in-flight requests
 let searchResultsData = []; // Store search results data separately
 let currentTasks = []; // Store current tasks for queue panel
+let pendingDownload = null; // Store pending download item for modal
 
 // Search music
 async function searchMusic() {
@@ -88,7 +101,7 @@ function displaySearchResults(results) {
   `).join('');
 }
 
-// Download song by index
+// Download song by index - shows quality selection modal
 async function downloadSongByIndex(index, buttonElement) {
   const item = searchResultsData[index];
   if (!item) {
@@ -96,38 +109,106 @@ async function downloadSongByIndex(index, buttonElement) {
     return;
   }
   
-  // Disable button immediately
-  if (buttonElement) {
-    buttonElement.disabled = true;
-    buttonElement.textContent = 'Added ✓';
-    buttonElement.style.background = '#28a745';
+  // Store pending download and button reference
+  pendingDownload = { item, buttonElement };
+  
+  // Show quality selection modal
+  showQualityModal(item);
+}
+
+// Show quality selection modal
+function showQualityModal(item) {
+  // Set song info
+  modalSongTitle.textContent = item.title;
+  modalSongArtist.textContent = item.artist;
+  
+  // Parse available qualities from rawFormat
+  const availableQualities = getAvailableQualities(item.rawFormat);
+  
+  // Render quality options
+  renderQualityOptions(availableQualities);
+  
+  // Show modal
+  qualityModal.style.display = 'block';
+  modalOverlay.style.display = 'block';
+}
+
+// Get available qualities from rawFormat
+function getAvailableQualities(rawFormat) {
+  const qualities = [];
+  
+  if (Array.isArray(rawFormat)) {
+    for (const format of rawFormat) {
+      if (typeof format === 'object' && format.formatType) {
+        qualities.push({
+          code: format.formatType,
+          name: getQualityName(format.formatType),
+          size: format.size || format.fileSize || null
+        });
+      }
+    }
+  } else if (rawFormat && typeof rawFormat === 'object') {
+    if (rawFormat.formatType) {
+      qualities.push({
+        code: rawFormat.formatType,
+        name: getQualityName(rawFormat.formatType),
+        size: rawFormat.size || rawFormat.fileSize || null
+      });
+    }
   }
   
-  // Get the cover image element for animation
-  const resultItem = buttonElement ? buttonElement.closest('.result-item') : null;
-  const coverImg = resultItem ? resultItem.querySelector('.result-cover') : null;
-  
-  try {
-    await downloadSong(item);
-    
-    // Trigger flying animation
-    if (coverImg) {
-      flyToQueue(coverImg);
-    }
-    
-  } catch (error) {
-    // Re-enable button on error
-    if (buttonElement) {
-      buttonElement.disabled = false;
-      buttonElement.textContent = 'Download';
-      buttonElement.style.background = '';
-    }
-    throw error;
+  // If no qualities found, default to HQ
+  if (qualities.length === 0) {
+    qualities.push({ code: 'HQ', name: 'HQ (320K MP3)', size: null });
   }
+  
+  // Sort by quality (SQ > HQ > PQ > LQ)
+  const qualityOrder = { 'SQ': 4, 'HQ': 3, 'PQ': 2, 'LQ': 1 };
+  qualities.sort((a, b) => (qualityOrder[b.code] || 0) - (qualityOrder[a.code] || 0));
+  
+  return qualities;
+}
+
+// Get quality name from code
+function getQualityName(code) {
+  const names = {
+    'SQ': 'SQ (FLAC)',
+    'HQ': 'HQ (320K MP3)',
+    'PQ': 'PQ (128K MP3)',
+    'LQ': 'LQ (64K MP3)'
+  };
+  return names[code] || code;
+}
+
+// Render quality options
+function renderQualityOptions(qualities) {
+  qualityOptions.innerHTML = qualities.map(q => `
+    <div class="quality-option ${q.code === 'HQ' ? 'selected' : ''}" data-quality="${escapeHtml(q.code)}">
+      <div class="quality-label">${escapeHtml(q.name)}</div>
+      ${q.size ? `<div class="quality-desc">${formatBytes(q.size)}</div>` : ''}
+    </div>
+  `).join('');
+  
+  // Add click handlers
+  document.querySelectorAll('.quality-option').forEach(option => {
+    option.addEventListener('click', function() {
+      // Remove selected class from all
+      document.querySelectorAll('.quality-option').forEach(opt => opt.classList.remove('selected'));
+      // Add to clicked
+      this.classList.add('selected');
+    });
+  });
+}
+
+// Hide quality modal
+function hideQualityModal() {
+  qualityModal.style.display = 'none';
+  modalOverlay.style.display = 'none';
+  pendingDownload = null;
 }
 
 // Download song
-async function downloadSong(item) {
+async function downloadSong(item, preferredToneFlag = 'HQ', allowDegrade = false, degradeOrder = ['HQ', 'PQ', 'LQ']) {
   try {
     const response = await fetch('/api/tasks', {
       method: 'POST',
@@ -142,7 +223,10 @@ async function downloadSong(item) {
         coverUrl: item.coverUrl,
         downloadUrl: item.downloadUrl,
         fileSize: item.fileSize,
-        format: item.format
+        format: item.format,
+        preferredToneFlag: preferredToneFlag,
+        allowDegrade: allowDegrade,
+        degradeOrder: degradeOrder
       })
     });
     
@@ -439,6 +523,77 @@ searchText.addEventListener('keypress', (e) => {
 queueBtn.addEventListener('click', showQueuePanel);
 closePanelBtn.addEventListener('click', hideQueuePanel);
 queuePanelOverlay.addEventListener('click', hideQueuePanel);
+
+// Quality modal event listeners
+closeModalBtn.addEventListener('click', hideQualityModal);
+cancelDownloadBtn.addEventListener('click', hideQualityModal);
+modalOverlay.addEventListener('click', hideQualityModal);
+
+// Strategy radio buttons
+document.querySelectorAll('input[name="strategy"]').forEach(radio => {
+  radio.addEventListener('change', function() {
+    const allowDegrade = this.value === 'allow-degrade';
+    degradeOrderSection.style.display = allowDegrade ? 'block' : 'none';
+  });
+});
+
+// Confirm download button
+confirmDownloadBtn.addEventListener('click', async function() {
+  if (!pendingDownload) return;
+  
+  const { item, buttonElement } = pendingDownload;
+  
+  // Get selected quality
+  const selectedQuality = document.querySelector('.quality-option.selected');
+  const preferredToneFlag = selectedQuality ? selectedQuality.dataset.quality : 'HQ';
+  
+  // Get strategy
+  const strategyRadio = document.querySelector('input[name="strategy"]:checked');
+  const allowDegrade = strategyRadio ? strategyRadio.value === 'allow-degrade' : false;
+  
+  // Degradation order (for now, hardcoded but could be customizable)
+  const degradeOrder = ['HQ', 'PQ', 'LQ'];
+  
+  // Update degrade order display
+  if (allowDegrade) {
+    const startIndex = degradeOrder.indexOf(preferredToneFlag);
+    if (startIndex >= 0) {
+      const actualOrder = degradeOrder.slice(startIndex);
+      degradeOrderDisplay.textContent = actualOrder.join(' → ');
+    }
+  }
+  
+  // Disable button
+  if (buttonElement) {
+    buttonElement.disabled = true;
+    buttonElement.textContent = 'Added ✓';
+    buttonElement.style.background = '#28a745';
+  }
+  
+  // Hide modal
+  hideQualityModal();
+  
+  // Get the cover image element for animation
+  const resultItem = buttonElement ? buttonElement.closest('.result-item') : null;
+  const coverImg = resultItem ? resultItem.querySelector('.result-cover') : null;
+  
+  try {
+    await downloadSong(item, preferredToneFlag, allowDegrade, degradeOrder);
+    
+    // Trigger flying animation
+    if (coverImg) {
+      flyToQueue(coverImg);
+    }
+    
+  } catch (error) {
+    // Re-enable button on error
+    if (buttonElement) {
+      buttonElement.disabled = false;
+      buttonElement.textContent = 'Download';
+      buttonElement.style.background = '';
+    }
+  }
+});
 
 // Start polling for tasks
 function startPolling() {
