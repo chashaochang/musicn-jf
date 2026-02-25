@@ -6,7 +6,9 @@ const searchResults = document.getElementById('searchResults');
 const tasksList = document.getElementById('tasksList');
 
 // State
-let polling = null;
+let pollingTimeoutId = null; // Timeout ID for next scheduled poll
+let isLoadingTasks = false; // Flag to prevent concurrent requests
+let abortController = null; // AbortController for canceling in-flight requests
 let searchResultsData = []; // Store search results data separately
 
 // Search music
@@ -126,8 +128,24 @@ async function downloadSong(item) {
 
 // Load tasks
 async function loadTasks() {
+  // Prevent concurrent requests - only one request should be in-flight at a time
+  if (isLoadingTasks) {
+    console.log('loadTasks: Already loading, skipping...');
+    return;
+  }
+
+  isLoadingTasks = true;
+
+  // Cancel any previous in-flight request
+  if (abortController) {
+    abortController.abort();
+  }
+  abortController = new AbortController();
+
   try {
-    const response = await fetch('/api/tasks');
+    const response = await fetch('/api/tasks', { 
+      signal: abortController.signal 
+    });
     const tasks = await response.json();
     
     if (tasks.error) {
@@ -136,24 +154,46 @@ async function loadTasks() {
     
     displayTasks(tasks);
     
-    // Optimize polling: only continue if there are active tasks
+    // Determine if there are active tasks
     const hasActiveTasks = tasks.some(task => 
       ['queued', 'downloading', 'organizing'].includes(task.status)
     );
     
-    if (!hasActiveTasks && polling) {
-      // No active tasks, slow down polling
-      stopPolling();
-      startPolling(10000); // Poll every 10 seconds instead
-    } else if (hasActiveTasks && polling) {
-      // Ensure we're polling at fast rate
-      stopPolling();
-      startPolling(3000);
-    }
+    // Schedule next poll based on task activity
+    // Active tasks: poll every 3 seconds for frequent updates
+    // No active tasks: poll every 10 seconds for background monitoring
+    const nextInterval = hasActiveTasks ? 3000 : 10000;
+    scheduleNextPoll(nextInterval);
     
   } catch (error) {
-    console.error('Failed to load tasks:', error);
+    if (error.name === 'AbortError') {
+      console.log('loadTasks: Request aborted');
+    } else {
+      console.error('Failed to load tasks:', error);
+      // On error, retry after 10 seconds
+      scheduleNextPoll(10000);
+    }
+  } finally {
+    isLoadingTasks = false;
   }
+}
+
+// Schedule the next poll after a delay
+// This implements serial polling: only one request in-flight at a time
+// Why not setInterval? setInterval fires at fixed intervals regardless of
+// request completion time, leading to request pile-up if responses are slow.
+// Using setTimeout after request completion ensures serial execution.
+function scheduleNextPoll(delay) {
+  // Clear any existing scheduled poll
+  if (pollingTimeoutId) {
+    clearTimeout(pollingTimeoutId);
+    pollingTimeoutId = null;
+  }
+  
+  // Schedule the next poll
+  pollingTimeoutId = setTimeout(() => {
+    loadTasks();
+  }, delay);
 }
 
 // Display tasks
@@ -204,17 +244,27 @@ searchText.addEventListener('keypress', (e) => {
 });
 
 // Start polling for tasks
-function startPolling(interval = 3000) {
+function startPolling() {
+  // Immediately load tasks and start the polling cycle
   loadTasks();
-  polling = setInterval(loadTasks, interval);
 }
 
 // Stop polling
 function stopPolling() {
-  if (polling) {
-    clearInterval(polling);
-    polling = null;
+  // Cancel any scheduled poll
+  if (pollingTimeoutId) {
+    clearTimeout(pollingTimeoutId);
+    pollingTimeoutId = null;
   }
+  
+  // Abort any in-flight request
+  if (abortController) {
+    abortController.abort();
+    abortController = null;
+  }
+  
+  // Reset loading flag
+  isLoadingTasks = false;
 }
 
 // Initialize
