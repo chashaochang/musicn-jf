@@ -10,14 +10,113 @@ import { updateTaskStatus, getTaskById, getNextQueuedTask } from '../db/database
 let isProcessing = false;
 
 /**
+ * Map quality label (SQ/HQ/PQ/LQ) to actual Migu format code from rawFormat
+ * @param {string} qualityLabel - Quality label (SQ, HQ, PQ, LQ)
+ * @param {string|object|array} rawFormat - The rawFormat data from search results
+ * @returns {string|null} - The actual format code (e.g., "020010" for HQ) or null if not found
+ */
+function mapQualityToFormatCode(qualityLabel, rawFormat) {
+  if (!rawFormat) {
+    return null;
+  }
+  
+  // Parse rawFormat if it's a JSON string
+  let formatData = rawFormat;
+  if (typeof rawFormat === 'string') {
+    try {
+      formatData = JSON.parse(rawFormat);
+    } catch (e) {
+      // Not JSON, might be a simple string format label
+      return null;
+    }
+  }
+  
+  // If rawFormat is an array, find the matching quality entry
+  if (Array.isArray(formatData)) {
+    const entry = formatData.find(item => 
+      item && item.formatType === qualityLabel
+    );
+    
+    if (entry) {
+      // Priority: androidFormat > iosFormat > format
+      const formatCode = entry.androidFormat || entry.iosFormat || entry.format;
+      if (formatCode) {
+        return String(formatCode);
+      }
+    }
+  } 
+  // If rawFormat is a single object, check if it matches the quality
+  else if (typeof formatData === 'object' && formatData !== null) {
+    if (formatData.formatType === qualityLabel) {
+      const formatCode = formatData.androidFormat || formatData.iosFormat || formatData.format;
+      if (formatCode) {
+        return String(formatCode);
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Map quality label to format code with degradation fallback
+ * Tries to find format code for the requested quality, or falls back to available qualities
+ * @param {string} qualityLabel - Preferred quality label (SQ, HQ, PQ, LQ)
+ * @param {string|object|array} rawFormat - The rawFormat data from search results
+ * @param {string[]} degradeOrder - Order of qualities to try if preferred not available
+ * @returns {{formatCode: string|null, actualQuality: string|null, mappingLog: string[]}}
+ */
+function mapQualityWithFallback(qualityLabel, rawFormat, degradeOrder = ['HQ', 'PQ', 'LQ']) {
+  const mappingLog = [];
+  
+  // Try preferred quality first
+  const preferredCode = mapQualityToFormatCode(qualityLabel, rawFormat);
+  if (preferredCode) {
+    mappingLog.push(`${qualityLabel} → ${preferredCode} (preferred)`);
+    return { 
+      formatCode: preferredCode, 
+      actualQuality: qualityLabel,
+      mappingLog 
+    };
+  }
+  
+  mappingLog.push(`${qualityLabel} → not found in rawFormat`);
+  
+  // Try degradation order
+  for (const quality of degradeOrder) {
+    if (quality === qualityLabel) {
+      continue; // Already tried
+    }
+    
+    const code = mapQualityToFormatCode(quality, rawFormat);
+    if (code) {
+      mappingLog.push(`${quality} → ${code} (degraded)`);
+      return {
+        formatCode: code,
+        actualQuality: quality,
+        mappingLog
+      };
+    }
+    mappingLog.push(`${quality} → not found`);
+  }
+  
+  return {
+    formatCode: null,
+    actualQuality: null,
+    mappingLog
+  };
+}
+
+/**
  * Resolve Migu download URL using copyrightId and toneFlag
  * Tries multiple APIs and fields to find a working download URL
  * @param {string} copyrightId - The Migu copyright ID
  * @param {string} contentId - The Migu content ID (optional)
- * @param {string} toneFlag - Quality flag (HQ, PQ, LQ, SQ)
+ * @param {string} toneFlag - Quality flag (HQ, PQ, LQ, SQ) - will be mapped to format code
+ * @param {string|object|array} rawFormat - The rawFormat data for mapping toneFlag to format code
  * @returns {Promise<{finalUrl: string, contentType?: string, error?: object}>}
  */
-async function resolveMiguUrl(copyrightId, contentId, toneFlag = 'HQ') {
+async function resolveMiguUrl(copyrightId, contentId, toneFlag = 'HQ', rawFormat = null) {
   if (!copyrightId) {
     return {
       finalUrl: null,
@@ -31,14 +130,45 @@ async function resolveMiguUrl(copyrightId, contentId, toneFlag = 'HQ') {
   console.log(`Resolving Migu URL: copyrightId=${copyrightId}, contentId=${contentId}, toneFlag=${toneFlag}`);
   
   const errors = [];
+  let mappingLog = [];
+  
+  // Map quality label to actual format code
+  let actualToneFlag = toneFlag; // Default to the quality label if mapping fails
+  if (rawFormat) {
+    const mapping = mapQualityWithFallback(toneFlag, rawFormat, []);
+    mappingLog = mapping.mappingLog;
+    
+    if (mapping.formatCode) {
+      actualToneFlag = mapping.formatCode;
+      console.log(`Mapped ${toneFlag} to format code: ${actualToneFlag}`);
+    } else {
+      console.warn(`Failed to map ${toneFlag} to format code from rawFormat. Mapping attempts:`, mappingLog);
+      // Continue with quality label as fallback, but log this issue
+      errors.push({
+        api: 'toneFlag_mapping',
+        message: `rawFormat does not contain format code for ${toneFlag}`,
+        mappingLog: mappingLog,
+        note: 'Using quality label as fallback - may cause PE parameter error'
+      });
+    }
+  } else {
+    console.warn(`No rawFormat provided - cannot map ${toneFlag} to format code`);
+    errors.push({
+      api: 'toneFlag_mapping',
+      message: 'rawFormat missing - cannot map quality to format code',
+      note: 'Using quality label as fallback - may cause PE parameter error'
+    });
+  }
   
   // Strategy 1: Try listenSong.do API (most reliable for direct audio URLs)
-  if (contentId) {
+  // Use contentId if available, otherwise fallback to copyrightId
+  const effectiveContentId = contentId || copyrightId;
+  if (effectiveContentId) {
     try {
-      const listenUrl = `https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/sub/listenSong.do?toneFlag=${toneFlag}&netType=00&userId=&ua=Android_migu&version=5.0.1&copyrightId=${copyrightId}&contentId=${contentId}&resourceType=2&channel=0`;
-      console.log(`Trying listenSong.do: ${listenUrl}`);
+      const listenUrl = `https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/sub/listenSong.do?toneFlag=${actualToneFlag}&netType=00&userId=&ua=Android_migu&version=5.0.1&copyrightId=${copyrightId}&contentId=${effectiveContentId}&resourceType=2&channel=0`;
+      console.log(`Trying listenSong.do with toneFlag=${actualToneFlag}: ${listenUrl}`);
       
-      const result = await resolveDownloadUrl(listenUrl, toneFlag);
+      const result = await resolveDownloadUrl(listenUrl, actualToneFlag);
       if (result.finalUrl) {
         console.log(`Successfully resolved via listenSong.do: ${result.finalUrl}`);
         return result;
@@ -46,19 +176,22 @@ async function resolveMiguUrl(copyrightId, contentId, toneFlag = 'HQ') {
       if (result.error) {
         errors.push({
           api: 'listenSong.do',
+          mappedToneFlag: `${toneFlag} → ${actualToneFlag}`,
           ...result.error
         });
       }
     } catch (error) {
       errors.push({
         api: 'listenSong.do',
+        mappedToneFlag: `${toneFlag} → ${actualToneFlag}`,
         message: error.message
       });
     }
   }
   
   // Strategy 2: Try resourceinfo.do with different resourceType values
-  const resourceTypes = [2, 0, 'E']; // Try music (2), general (0), and enhanced (E)
+  // Note: resourceType=E is not supported by the API, only trying 2 and 0
+  const resourceTypes = [2, 0]; // Try music (2) and general (0)
   
   for (const resourceType of resourceTypes) {
     try {
@@ -150,6 +283,8 @@ async function resolveMiguUrl(copyrightId, contentId, toneFlag = 'HQ') {
     error: {
       message: `Failed to resolve Migu URL after trying all strategies`,
       toneFlag: toneFlag,
+      mappedToneFlag: actualToneFlag,
+      mappingLog: mappingLog.length > 0 ? mappingLog : undefined,
       copyrightId: copyrightId,
       contentId: contentId,
       attempts: errors
@@ -536,8 +671,19 @@ export async function processDownloadTask(taskId) {
       // Migu service with empty downloadUrl - resolve using copyrightId
       console.log(`Migu task with empty downloadUrl, resolving using copyrightId=${task.copyright_id}`);
       
+      // Parse rawFormat if it's a JSON string
+      let rawFormat = task.raw_format;
+      if (rawFormat && typeof rawFormat === 'string') {
+        try {
+          rawFormat = JSON.parse(rawFormat);
+        } catch (e) {
+          console.warn(`Failed to parse raw_format:`, e);
+          rawFormat = null;
+        }
+      }
+      
       // Try to resolve URL with preferred quality first
-      resolveResult = await resolveMiguUrl(task.copyright_id, task.content_id, preferredToneFlag);
+      resolveResult = await resolveMiguUrl(task.copyright_id, task.content_id, preferredToneFlag, rawFormat);
       
       // If preferred quality failed and degradation is allowed
       if (resolveResult.error && allowDegrade) {
@@ -553,7 +699,7 @@ export async function processDownloadTask(taskId) {
           triedFlags.push(toneFlag);
           console.log(`Trying degraded quality: ${toneFlag}`);
           
-          resolveResult = await resolveMiguUrl(task.copyright_id, task.content_id, toneFlag);
+          resolveResult = await resolveMiguUrl(task.copyright_id, task.content_id, toneFlag, rawFormat);
           
           // If successful, break
           if (resolveResult.finalUrl) {
@@ -568,11 +714,39 @@ export async function processDownloadTask(taskId) {
         const error = resolveResult.error || {};
         let errorMessage = `Failed to resolve Migu download URL after trying qualities: ${triedFlags.join(', ')}. `;
         
+        // Add mapping information
+        if (error.mappingLog && error.mappingLog.length > 0) {
+          errorMessage += `Quality mapping: ${error.mappingLog.join(', ')}. `;
+        }
+        
         if (error.copyrightId) {
           errorMessage += `CopyrightId: ${error.copyrightId}. `;
         }
+        if (error.contentId) {
+          errorMessage += `ContentId: ${error.contentId}. `;
+        }
+        
         if (error.attempts && Array.isArray(error.attempts)) {
-          errorMessage += `Attempts: ${error.attempts.map(a => `${a.api}: ${a.message || a.code || 'unknown'}`).join('; ')}`;
+          const attemptMessages = error.attempts.map(a => {
+            let msg = `${a.api}`;
+            if (a.mappedToneFlag) {
+              msg += ` (${a.mappedToneFlag})`;
+            }
+            if (a.statusCode) {
+              msg += ` HTTP ${a.statusCode}`;
+            }
+            if (a.code) {
+              msg += ` code=${a.code}`;
+            }
+            if (a.message) {
+              msg += `: ${a.message}`;
+            }
+            if (a.mappingLog) {
+              msg += ` [${a.mappingLog.join(', ')}]`;
+            }
+            return msg;
+          });
+          errorMessage += `Attempts: ${attemptMessages.join('; ')}`;
         } else if (error.message) {
           errorMessage += error.message;
         }
@@ -587,7 +761,29 @@ export async function processDownloadTask(taskId) {
     } else if (task.download_url && task.download_url !== '') {
       // Has downloadUrl - try to resolve it (for redirects or JSON responses)
       console.log(`Resolving existing downloadUrl: ${task.download_url}`);
-      resolveResult = await resolveDownloadUrl(task.download_url, preferredToneFlag);
+      
+      // Parse rawFormat if it's a JSON string (for Migu listenSong.do URLs)
+      let rawFormat = task.raw_format;
+      if (rawFormat && typeof rawFormat === 'string') {
+        try {
+          rawFormat = JSON.parse(rawFormat);
+        } catch (e) {
+          console.warn(`Failed to parse raw_format:`, e);
+          rawFormat = null;
+        }
+      }
+      
+      // For Migu listenSong.do URLs, map quality to format code
+      let actualToneFlag = preferredToneFlag;
+      if (task.service === 'migu' && task.download_url.includes('listenSong.do') && rawFormat) {
+        const mapping = mapQualityWithFallback(preferredToneFlag, rawFormat, []);
+        if (mapping.formatCode) {
+          actualToneFlag = mapping.formatCode;
+          console.log(`Mapped ${preferredToneFlag} to format code: ${actualToneFlag}`);
+        }
+      }
+      
+      resolveResult = await resolveDownloadUrl(task.download_url, actualToneFlag);
       
       // If preferred quality failed and degradation is allowed
       if (resolveResult.error && allowDegrade) {
@@ -603,7 +799,17 @@ export async function processDownloadTask(taskId) {
           triedFlags.push(toneFlag);
           console.log(`Trying degraded quality: ${toneFlag}`);
           
-          resolveResult = await resolveDownloadUrl(task.download_url, toneFlag);
+          // Map this quality to format code if applicable
+          let degradedToneFlag = toneFlag;
+          if (task.service === 'migu' && task.download_url.includes('listenSong.do') && rawFormat) {
+            const mapping = mapQualityWithFallback(toneFlag, rawFormat, []);
+            if (mapping.formatCode) {
+              degradedToneFlag = mapping.formatCode;
+              console.log(`Mapped ${toneFlag} to format code: ${degradedToneFlag}`);
+            }
+          }
+          
+          resolveResult = await resolveDownloadUrl(task.download_url, degradedToneFlag);
           
           // If successful, break
           if (resolveResult.finalUrl) {
