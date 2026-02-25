@@ -53,6 +53,8 @@ export async function searchMigu(text, pageNum = 1, pageSize = 20) {
     
     return songs.map(item => {
       const rawFormat = item.format || item.formatType || item.rateFormats;
+      const { format, fileSize } = getFormatAndSize(item, rawFormat);
+      
       return {
         id: item.id || item.contentId || item.copyrightId,
         title: item.name || item.songName || 'Unknown',
@@ -60,9 +62,9 @@ export async function searchMigu(text, pageNum = 1, pageSize = 20) {
         album: item.albums?.[0]?.name || item.albumName || '',
         coverUrl: normalizeCoverUrl(item.cover || item.albumImgs || item.largePic),
         downloadUrl: getDownloadUrl(item),
-        fileSize: formatFileSize(item.fileSize),
-        format: getFormat(item),
-        // Keep raw format data for reference (optional)
+        fileSize: fileSize,
+        format: format,
+        // Keep raw format data for reference
         rawFormat: rawFormat
       };
     });
@@ -101,15 +103,18 @@ function normalizeCoverUrl(url) {
 /**
  * Format file size to human-readable format
  */
-function formatFileSize(size) {
-  if (!size || size === 0) return 'Unknown';
+function formatFileSize(bytes) {
+  if (!bytes || bytes === 0) return 'Unknown';
   
   // If already formatted as string, return as is
-  if (typeof size === 'string') return size;
+  if (typeof bytes === 'string') return bytes;
   
-  // Convert bytes to MB
-  const mb = size / (1024 * 1024);
-  return mb.toFixed(2) + ' MB';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const size = bytes / Math.pow(k, i);
+  
+  return size.toFixed(2) + ' ' + sizes[i];
 }
 
 /**
@@ -135,7 +140,87 @@ function getDownloadUrl(item) {
 }
 
 /**
+ * Get format and file size from Migu item
+ * Extracts readable format string and file size from rawFormat data
+ */
+function getFormatAndSize(item, rawFormat) {
+  let format = 'MP3';
+  let fileSize = 'Unknown';
+  
+  // If rawFormat is an array, process each format entry
+  if (Array.isArray(rawFormat)) {
+    // Get the highest quality format
+    const bestFormat = rawFormat[rawFormat.length - 1] || rawFormat[0];
+    
+    if (bestFormat && typeof bestFormat === 'object') {
+      // Extract format type
+      const formatType = bestFormat.formatType || bestFormat.androidFormatId || bestFormat.iosFormatId || '';
+      const ext = bestFormat.ext || bestFormat.format || '';
+      
+      // Map format codes to readable names
+      const formatMap = {
+        'SQ': 'SQ flac',
+        'HQ': 'HQ mp3',
+        'PQ': 'PQ mp3',
+        'LQ': 'LQ mp3'
+      };
+      
+      format = formatMap[formatType] || (ext ? ext.toUpperCase() : 'MP3');
+      
+      // Extract file size if available
+      if (bestFormat.size) {
+        fileSize = formatFileSize(bestFormat.size);
+      } else if (bestFormat.fileSize) {
+        fileSize = formatFileSize(bestFormat.fileSize);
+      }
+    } else if (typeof bestFormat === 'string') {
+      format = bestFormat.toUpperCase();
+    }
+  } else if (rawFormat && typeof rawFormat === 'object') {
+    // Single format object
+    const formatType = rawFormat.formatType || rawFormat.androidFormatId || rawFormat.iosFormatId || '';
+    const ext = rawFormat.ext || rawFormat.format || '';
+    
+    const formatMap = {
+      'SQ': 'SQ flac',
+      'HQ': 'HQ mp3',
+      'PQ': 'PQ mp3',
+      'LQ': 'LQ mp3'
+    };
+    
+    format = formatMap[formatType] || (ext ? ext.toUpperCase() : 'MP3');
+    
+    if (rawFormat.size) {
+      fileSize = formatFileSize(rawFormat.size);
+    } else if (rawFormat.fileSize) {
+      fileSize = formatFileSize(rawFormat.fileSize);
+    }
+  } else if (typeof rawFormat === 'string') {
+    format = rawFormat.toUpperCase();
+  }
+  
+  // Check formatType field directly on item
+  if (item.formatType) {
+    const formatMap = {
+      'SQ': 'SQ flac',
+      'HQ': 'HQ mp3',
+      'PQ': 'PQ mp3',
+      'LQ': 'LQ mp3'
+    };
+    format = formatMap[item.formatType] || String(item.formatType);
+  }
+  
+  // Try to get fileSize from item directly if not found in rawFormat
+  if (fileSize === 'Unknown' && item.fileSize) {
+    fileSize = formatFileSize(item.fileSize);
+  }
+  
+  return { format, fileSize };
+}
+
+/**
  * Get format from Migu item - always returns a string
+ * @deprecated Use getFormatAndSize instead
  */
 function getFormat(item) {
   // Check formatType field

@@ -12,12 +12,24 @@ let isProcessing = false;
 /**
  * Resolve URL by following redirects or parsing JSON responses
  * @param {string} url - The initial URL (e.g., listenSong.do)
- * @returns {Promise<{finalUrl: string, contentType?: string}>}
+ * @param {string} toneFlag - The quality flag (HQ, PQ, LQ, SQ)
+ * @returns {Promise<{finalUrl: string, contentType?: string, error?: object}>}
  */
-async function resolveDownloadUrl(url) {
+async function resolveDownloadUrl(url, toneFlag = 'HQ') {
   try {
+    // Update URL with toneFlag if it's a listenSong.do URL
+    let resolveUrl = url;
+    if (url.includes('listenSong.do')) {
+      // Replace or add toneFlag parameter
+      const urlObj = new URL(url);
+      urlObj.searchParams.set('toneFlag', toneFlag);
+      resolveUrl = urlObj.toString();
+    }
+    
+    console.log(`Resolving URL with toneFlag=${toneFlag}: ${resolveUrl}`);
+    
     // Make a HEAD request first to check for redirects
-    const response = await got.head(url, {
+    const response = await got.head(resolveUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://music.migu.cn/'
@@ -39,13 +51,55 @@ async function resolveDownloadUrl(url) {
       }
     }
     
+    // Handle error status codes (4xx, 5xx)
+    if (response.statusCode >= 400) {
+      const contentType = response.headers['content-type'] || '';
+      
+      // If it's JSON, fetch the body to get error details
+      if (contentType.includes('application/json')) {
+        try {
+          const errorResponse = await got.get(resolveUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Referer': 'https://music.migu.cn/'
+            },
+            timeout: { request: 10000 },
+            responseType: 'json',
+            throwHttpErrors: false
+          });
+          
+          const errorData = errorResponse.body;
+          const errorMsg = errorData?.message || errorData?.msg || errorData?.info || 'Unknown error';
+          const errorCode = errorData?.code || errorData?.errorCode || response.statusCode;
+          
+          console.error(`API returned ${response.statusCode} with JSON error:`, errorData);
+          
+          return {
+            finalUrl: null,
+            error: {
+              statusCode: response.statusCode,
+              contentType: contentType,
+              message: errorMsg,
+              code: errorCode,
+              toneFlag: toneFlag
+            }
+          };
+        } catch (jsonError) {
+          console.error(`Failed to parse JSON error response:`, jsonError);
+        }
+      }
+      
+      // Non-JSON error response
+      throw new Error(`HTTP ${response.statusCode} ${contentType ? `(${contentType})` : ''} for toneFlag=${toneFlag}`);
+    }
+    
     // If HEAD request succeeds (200), check content type
     if (response.statusCode === 200) {
       const contentType = response.headers['content-type'];
       
       // If it's JSON, fetch and parse it for the real URL
       if (contentType && contentType.includes('application/json')) {
-        const jsonResponse = await got.get(url, {
+        const jsonResponse = await got.get(resolveUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Referer': 'https://music.migu.cn/'
@@ -73,16 +127,16 @@ async function resolveDownloadUrl(url) {
       
       // If it's a direct audio file, use the original URL
       if (contentType && (contentType.includes('audio/') || contentType.includes('application/octet-stream'))) {
-        console.log(`URL is direct audio file: ${url}`);
+        console.log(`URL is direct audio file: ${resolveUrl}`);
         return {
-          finalUrl: url,
+          finalUrl: resolveUrl,
           contentType: contentType
         };
       }
     }
     
     // Fallback: if no redirect or JSON, try GET request to see if it redirects
-    const getResponse = await got.get(url, {
+    const getResponse = await got.get(resolveUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://music.migu.cn/'
@@ -311,15 +365,83 @@ export async function processDownloadTask(taskId) {
     // Update status to downloading
     updateTaskStatus(taskId, 'downloading');
     
-    // Resolve the download URL (follow redirects or parse JSON)
-    console.log(`Resolving URL for task ${taskId}: ${task.download_url}`);
-    const { finalUrl } = await resolveDownloadUrl(task.download_url);
+    // Parse degradation settings
+    const preferredToneFlag = task.preferred_tone_flag || 'HQ';
+    const allowDegrade = task.allow_degrade === 1;
+    let degradeOrder = ['HQ', 'PQ', 'LQ']; // Default
+    
+    if (task.degrade_order) {
+      try {
+        degradeOrder = JSON.parse(task.degrade_order);
+      } catch (e) {
+        console.warn(`Failed to parse degrade_order, using default:`, e);
+      }
+    }
+    
+    console.log(`Processing task ${taskId}: preferredToneFlag=${preferredToneFlag}, allowDegrade=${allowDegrade}`);
+    
+    // Try to resolve URL with preferred quality first
+    const triedFlags = [preferredToneFlag];
+    let resolveResult = await resolveDownloadUrl(task.download_url, preferredToneFlag);
+    
+    // If preferred quality failed and degradation is allowed
+    if (resolveResult.error && allowDegrade) {
+      console.log(`Preferred quality ${preferredToneFlag} failed, attempting degradation...`);
+      
+      // Try each quality in degradeOrder
+      for (const toneFlag of degradeOrder) {
+        // Skip if already tried
+        if (triedFlags.includes(toneFlag)) {
+          continue;
+        }
+        
+        triedFlags.push(toneFlag);
+        console.log(`Trying degraded quality: ${toneFlag}`);
+        
+        resolveResult = await resolveDownloadUrl(task.download_url, toneFlag);
+        
+        // If successful, break
+        if (resolveResult.finalUrl) {
+          console.log(`Successfully resolved with degraded quality: ${toneFlag}`);
+          break;
+        }
+      }
+    }
+    
+    // If still failed after all attempts
+    if (resolveResult.error || !resolveResult.finalUrl) {
+      const error = resolveResult.error || {};
+      let errorMessage = `Failed to resolve download URL after trying: ${triedFlags.join(', ')}. `;
+      
+      if (error.statusCode) {
+        errorMessage += `Status: ${error.statusCode}`;
+      }
+      if (error.contentType) {
+        errorMessage += `, Content-Type: ${error.contentType}`;
+      }
+      if (error.message) {
+        errorMessage += `, Message: ${error.message}`;
+      }
+      if (error.code) {
+        errorMessage += `, Code: ${error.code}`;
+      }
+      
+      // Store tried flags for debugging
+      updateTaskStatus(taskId, 'failed', errorMessage, {
+        triedToneFlags: triedFlags.join(',')
+      });
+      
+      throw new Error(errorMessage);
+    }
+    
+    const finalUrl = resolveResult.finalUrl;
     console.log(`Resolved to: ${finalUrl}`);
     
-    // Store both source and resolved URLs
+    // Store both source and resolved URLs, and tried flags
     updateTaskStatus(taskId, 'downloading', null, {
       sourceUrl: task.download_url,
-      resolvedUrl: finalUrl
+      resolvedUrl: finalUrl,
+      triedToneFlags: triedFlags.join(',')
     });
     
     // Download file using resolved URL
