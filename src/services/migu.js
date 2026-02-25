@@ -97,6 +97,8 @@ export async function searchMigu(text, pageNum = 1, pageSize = 20) {
       
       return {
         id: item.id || item.contentId || item.copyrightId,
+        copyrightId: item.copyrightId,
+        contentId: item.contentId,
         title: item.name || item.songName || 'Unknown',
         artist: item.singers?.map(s => s.name).join(', ') || item.singer || 'Unknown Artist',
         album: item.albums?.[0]?.name || item.albumName || '',
