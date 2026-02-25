@@ -27,9 +27,11 @@ const confirmDownloadBtn = document.getElementById('confirmDownloadBtn');
 let pollingTimeoutId = null; // Timeout ID for next scheduled poll
 let isLoadingTasks = false; // Flag to prevent concurrent requests
 let abortController = null; // AbortController for canceling in-flight requests
-let searchResultsData = []; // Store search results data separately
 let currentTasks = []; // Store current tasks for queue panel
 let pendingDownload = null; // Store pending download item for modal
+
+// Store search results data on window for inline onclick handlers to access
+window.searchResultsData = [];
 
 // Search music
 async function searchMusic() {
@@ -69,12 +71,12 @@ async function searchMusic() {
 function displaySearchResults(results) {
   if (!results || results.length === 0) {
     searchResults.innerHTML = '<p class="placeholder">No results found</p>';
-    searchResultsData = [];
+    window.searchResultsData = [];
     return;
   }
   
   // Store results data
-  searchResultsData = results;
+  window.searchResultsData = results;
   
   searchResults.innerHTML = results.map((item, index) => `
     <div class="result-item">
@@ -103,7 +105,7 @@ function displaySearchResults(results) {
 
 // Download song by index - shows quality selection modal
 async function downloadSongByIndex(index, buttonElement) {
-  const item = searchResultsData[index];
+  const item = window.searchResultsData[index];
   if (!item) {
     alert('Invalid item selected');
     return;
@@ -115,6 +117,9 @@ async function downloadSongByIndex(index, buttonElement) {
   // Show quality selection modal
   showQualityModal(item);
 }
+
+// Expose to window for inline onclick handlers
+window.downloadSongByIndex = downloadSongByIndex;
 
 // Show quality selection modal
 function showQualityModal(item) {
